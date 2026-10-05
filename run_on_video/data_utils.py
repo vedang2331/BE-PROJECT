@@ -40,6 +40,7 @@ setup_windows_paths()
 
 import ffmpeg
 from run_on_video import clip
+from utils.video_utils import validate_video_file, convert_to_float
 
 
 class ClipFeatureExtractor:
@@ -167,13 +168,14 @@ class VideoLoader:
             return self.size, int(w * self.size / h)
 
     def read_video_from_file(self, video_path):
+        is_valid, err_msg, info = validate_video_file(video_path, max_duration=None)
+        if not is_valid:
+            raise ValueError(err_msg)
         try:
             info = self._get_video_info(video_path)
             h, w = info["height"], info["width"]
         except Exception as e:
-            print('ffprobe failed at: {} ({})'.format(video_path, e))
-            return {'video': torch.zeros(1), 'input': video_path,
-                    'info': {}}
+            raise ValueError(f"Error: Could not read video metadata from '{os.path.basename(video_path)}': {e}")
         height, width = self._get_output_dim(h, w)
         try:
             duration = info["duration"]

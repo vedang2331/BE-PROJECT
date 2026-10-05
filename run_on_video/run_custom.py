@@ -9,6 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import torch
 from run_on_video.run import MomentDETRPredictor, print_diagnostics
+from utils.video_utils import validate_video_file
 
 
 def format_timestamp(seconds: float) -> str:
@@ -24,11 +25,12 @@ def run_custom(video_path: str, queries: list, ckpt_path: str, top_n: int = 5, m
     video_path = os.path.abspath(video_path)
     ckpt_path = os.path.abspath(ckpt_path)
 
-    if not os.path.exists(video_path):
-        print(f"Error: Video file not found at: {video_path}")
+    is_valid, err_msg, _ = validate_video_file(video_path, max_duration=150.0)
+    if not is_valid:
+        print(err_msg, file=sys.stderr)
         return
     if not os.path.exists(ckpt_path):
-        print(f"Error: Checkpoint file not found at: {ckpt_path}")
+        print(f"Error: Checkpoint file not found at: {ckpt_path}", file=sys.stderr)
         return
 
     print_diagnostics()

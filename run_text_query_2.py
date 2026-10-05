@@ -104,6 +104,9 @@ class MomentDETRPredictor:
         return predictions, cur_ranked_high
 
 
+from utils.video_utils import validate_video_file
+
+
 def run_example():
     if len(sys.argv) < 2:
         print("Usage: python run_text_query_2.py <video_path>")
@@ -114,17 +117,33 @@ def run_example():
     
     print(f"Video Path: {video_path}")
     print(f"Query Path: {query_path}")
+
+    is_valid, err_msg, _ = validate_video_file(video_path, max_duration=150.0)
+    if not is_valid:
+        print(err_msg, file=sys.stderr)
+        sys.exit(1)
     
     if not os.path.exists(query_path):
-        print(f"Query file {query_path} not found.")
-        return
+        print(f"Error: Query file '{query_path}' not found.", file=sys.stderr)
+        sys.exit(1)
 
-    queries = load_jsonl(query_path)
-    query_text_list = [e["query"] for e in queries]
+    try:
+        queries = load_jsonl(query_path)
+        query_text_list = [e["query"] for e in queries if isinstance(e, dict) and "query" in e and e["query"].strip()]
+        if not query_text_list:
+            print(f"Error: Query file '{query_path}' contains no valid text queries.", file=sys.stderr)
+            sys.exit(1)
+    except Exception as e:
+        print(f"Error reading query file '{query_path}': {e}", file=sys.stderr)
+        sys.exit(1)
     
     ckpt_path = "results_1/model_best.ckpt"
     if not os.path.exists(ckpt_path):
         ckpt_path = "run_on_video/moment_detr_ckpt/model_best.ckpt"
+
+    if not os.path.exists(ckpt_path):
+        print(f"Error: Checkpoint file '{ckpt_path}' not found.", file=sys.stderr)
+        sys.exit(1)
 
     print("Build models...")
     clip_model_name_or_path = "ViT-B/32"
@@ -147,31 +166,36 @@ def run_example():
         print(f">> Predicted saliency scores (for all 2-sec clip): "
               f"{predictions[idx]['pred_saliency_scores']}")
               
-    start_pt = list(map(lambda x: x[0], cur_ranked_high))
-    start_pt = sorted(start_pt)
-    a = len(start_pt)
-    end_pt = list(map(lambda x: x[1], cur_ranked_high))
-    end_pt = sorted(end_pt)
-    
+    import shutil
+    # Sort high-confidence predictions by start timestamp while preserving intact (start, end) pairs
+    cur_ranked_high = sorted(cur_ranked_high, key=lambda x: x[0])
+    a = len(cur_ranked_high)
+
+    start_pt = [x[0] for x in cur_ranked_high]
+    end_pt = [x[1] for x in cur_ranked_high]
+
     print("Start points:", start_pt)
     print("End points:", end_pt)
     input_file = video_path
-    
+
     os.makedirs("Results", exist_ok=True)
-    
+
     for i in range(a):
         n = i
-        s_s = max(0.0, start_pt[i])
-        t_o = max(s_s + 0.1, end_pt[i])
+        s_s = max(0.0, cur_ranked_high[i][0])
+        t_o = max(s_s + 0.1, cur_ranked_high[i][1])
         cmd = f'ffmpeg -y -i "{input_file}" -ss {s_s} -to {t_o} -c:v libx264 -crf 30 "Results/output_{n}.mp4"'
         os.system(cmd)
-    
-    with open('Results/video_clips.txt', 'w') as file_handler:    
+
+    with open('Results/video_clips.txt', 'w') as file_handler:
         for i in range(a):
             file_handler.write("file 'output_{}.mp4'\n".format(i))
 
-    cmd = f'ffmpeg -y -f concat -safe 0 -i Results/video_clips.txt -c copy Results/output.mp4'
-    os.system(cmd)
+    if a == 1:
+        shutil.copyfile("Results/output_0.mp4", "Results/output.mp4")
+    elif a > 1:
+        cmd = f'ffmpeg -y -f concat -safe 0 -i Results/video_clips.txt -c:v libx264 -crf 30 Results/output.mp4'
+        os.system(cmd)
 
 if __name__ == "__main__":
     run_example()
